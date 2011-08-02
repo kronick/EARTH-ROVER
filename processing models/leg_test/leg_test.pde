@@ -1,10 +1,13 @@
+import processing.serial.*;
 import processing.opengl.*;
+
+Serial S;
 
 ActuatorSet actuators;
 float hip      = 368.5;
 float femur    = 212.7;
 float tibia    = 368.5;
-float cankle   = 100;
+float cankle   = 150;
 
 float swingArm   = 150;  //150
 float swingMount = 150;  // 75
@@ -26,10 +29,14 @@ float profileScale;
 
 PFont monofont;
 
+int currentLegNum = 0;
+
 void setup() {
   size(800,600); 
   smooth(); 
   frameRate(50);
+  
+  S = new Serial(this, Serial.list()[0], 9600);
 
   actuators = new ActuatorSet(425,425,425);
 
@@ -49,9 +56,15 @@ void setup() {
   textFont(monofont);
 }
 
+
 void draw() {
   background(20);
 
+  while(S.available() > 0) {
+    String in = S.readString();
+    if(in != null)
+      print(in);
+  }
   //actuators.a = 425 + cos(.82*frameCount/75.)*75;
   //actuators.b = 425 + cos(frameCount/75.)*75;
 
@@ -177,6 +190,41 @@ void draw() {
     }
 
     break;
+    
+  case 3:  // top precise drawing mode
+    pushMatrix();
+    translate(width/2, 0);
+    scale(-1,1);
+    stroke(255);
+    noFill();
+    ellipse(0,0, 10,10);
+    
+    pushMatrix();
+      rotate(radians(-44.7));
+      line(0,0, 0,290+swingArm);
+    popMatrix();
+    pushMatrix();
+      rotate(radians(33.8));
+      line(0,0, 0,290+swingArm);
+    popMatrix();
+    
+    stroke(255);
+    strokeWeight(1);
+    for(int i=trails.length-1; i>=0; i--) {
+      if(i<trails.length-1)
+        trails[i+1] = trails[i];
+      if(trails[i] != null) {
+        point(trails[i].y, trails[i].x);
+      }
+    }
+    trails[0] = realFoot.get();    
+    
+    noStroke();
+    fill(255,0,128);
+    ellipse(foot.y, foot.x, 10,10);
+    
+    popMatrix();
+    break;
   }
 
   popMatrix();
@@ -193,7 +241,7 @@ void draw() {
 
 ActuatorSet IK(PVector foot) {
   float swingAngle = PI/2-atan2(foot.y, foot.x);
-  println("IK Swing Angle: " + swingAngle);
+  //println("IK Swing Angle: " + swingAngle);
   
   PVector f_prime = new PVector(sqrt(foot.x*foot.x + foot.y*foot.y)-swingArm, 0, foot.z);
   float D = new PVector(0,0,hip).dist(f_prime);
@@ -230,7 +278,7 @@ PVector FK(ActuatorSet S) {
   float swingAngle = acos((swingMount*swingMount + swingBase*swingBase - S.c*S.c) /
     (2*swingBase*swingMount)) - radians(frameAngle);
   
-  println("FK Swing angle: " + swingAngle);
+  //println("FK Swing angle: " + swingAngle);
   //println(swingAngle);
   // REMOVE THIS
   //swingAngle = radians(90);
@@ -260,6 +308,25 @@ void keyPressed() {
   case 'g':
     drawGraph = !drawGraph;
     break;
+  
+  case 'q':
+    currentLegNum = 0;
+    break;
+  case 'w':
+    currentLegNum = 1;
+    break;
+  case 'e':
+    currentLegNum = 2;
+    break;
+  case 'r':
+    currentLegNum = 3;
+    break;
+  case 't':
+    currentLegNum = 4;
+    break;
+  case 'y':
+    currentLegNum = 5;
+    break;
     
   case '1':
     view = 1;
@@ -267,6 +334,8 @@ void keyPressed() {
   case '2':
     view = 2;
     break;
+  case '3':
+    view = 3;
   }
   
 }
@@ -275,11 +344,23 @@ void mousePressed() {
   mouseDragged();
 }
 void mouseDragged() {
-  if(mouseButton == LEFT)
-    foot = new PVector((mouseX-profileCenter.x)/profileScale, 0, (mouseY-profileCenter.y)/profileScale); 
-  else
-    foot = new PVector(foot.x, (mouseX-profileCenter.x), foot.z);
-  println(foot);
+  switch (view) {
+    case 1:
+      if(mouseButton == LEFT)
+        foot = new PVector((mouseX-profileCenter.x)/profileScale, 0, (mouseY-profileCenter.y)/profileScale); 
+      else
+        foot = new PVector(foot.x, (mouseX-profileCenter.x), foot.z);
+      println(foot);
+      
+      break;
+    case 3:
+      if(mouseButton == LEFT)
+        foot = new PVector(mouseY,-(mouseX-width/2), foot.z);
+      else
+        foot = new PVector(foot.x, foot.y, foot.z + (mouseY - pmouseY)/5.);
+      break;
+    }
+  writeSlowly(foot);
 }
 
 void graphSample(float s) {
@@ -291,6 +372,18 @@ void graphSample(float s) {
   graph[0] = s;  
 }
 
+
+void writeSlowly(PVector foot) {
+  String x = nf(foot.x*100, 5,0);
+  String y = nf(foot.y*100, 5,0);
+  String z = nf(foot.z*100, 5,0);
+  String out = "!L" + currentLegNum + "x" + x + "y" + y + "z" + z + "*?";
+  S.write(out);
+  /*for(int i=0; i<out.length(); i++) {
+    S.write(out.charAt(i));
+    //delay(1);
+  }*/
+}
 
 void drawProfile() {
   PVector realFoot = FK(actuators);
@@ -354,7 +447,7 @@ void drawProfile() {
   // Lines to knee
   stroke(255,0,128);
   strokeWeight(8);
-
+ 
   line(swingArm,hip, knee.x,knee.z);
   stroke(0,128,255);
   strokeWeight(20);
@@ -393,4 +486,8 @@ void drawProfile() {
   ellipse(flatfoot.x, flatfoot.z, 40,40);
   fill(255);
   text("[" + nfs(realFoot.x, 3,1) + ", " + nfs(realFoot.y, 3,1) + ", " + nfs(realFoot.z, 3,1) + "]", flatfoot.x+40, flatfoot.z);
+  
+  text("A = " + actuators.a, 0,-60);
+  text("B = " + actuators.b, 0,-40);
+  text("C = " + actuators.c, 0,-20);
 }

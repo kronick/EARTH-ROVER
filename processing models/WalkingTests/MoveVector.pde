@@ -12,6 +12,8 @@ class MoveVector {
   }
   MoveVector(PVector t, float r) {
     this.translation = t.get();
+    this.heading = atan2(t.y, t.x);
+    this.speed = t.mag();
     this.rotation = r;
   }
   

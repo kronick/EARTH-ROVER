@@ -1,3 +1,5 @@
+import processing.serial.*;
+
 Controller controller;
 
 PFont monofont;
@@ -7,16 +9,22 @@ void setup() {
   colorMode(RGB);
   smooth();
   
+  frameRate(45);
+  
   monofont = createFont("Courier", 10);
   textFont(monofont);
   
-  controller = new Controller(Controller.HEX_BODY);
+  controller = new Controller(this, Controller.HEX_BODY);
 }
 
 void draw() {
   background(10);
 
   controller.update();
+  
+  fill(255);
+  textAlign(LEFT);
+  text(nf(frameRate, 2,2), 10,10);
   
   pushMatrix();
     translate(width/2, height/2);
@@ -36,10 +44,18 @@ void mousePressed() {
 }
 
 void mouseDragged() {
-  PVector t = new PVector(-(mouseX-width/2), height-mouseY-height/2,0);
-  controller.changeMoveVector(new MoveVector(t, 0));
+  if(mouseButton == LEFT) {
+    PVector t = new PVector(-(mouseX-width/2), height-mouseY-height/2,0);
+    t.mult(2);
+    controller.changeMoveVector(new MoveVector(t, 0));
+  }
+  else {
+    controller.changeMoveVector(new MoveVector(controller.currentMove.translation, radians(-(mouseX-width/2))));
+  }
+  //PVector t = new PVector(0, (height-mouseY-height/2)*2,0);
+  //controller.changeMoveVector(new MoveVector(t, radians(-(mouseX-width/2))));
 }
 
 void mouseReleased() {
-  controller.changeMoveVector(new MoveVector(new PVector(0,0,0), 0));
+  //controller.changeMoveVector(new MoveVector(new PVector(0,0,0), 0));
 }

@@ -18,12 +18,26 @@ class Controller {
   int state;
   MoveVector currentMove;
   MoveVector nextMove;
-  
-  float leg_down = 40;
-  float leg_up   = 20;
 
+  float[] relaxedDistance = {0,0,0};
+  float[] stretchDistance = {0,0,0};
   
-  Controller(int bodyType) {
+  // Step height stuff
+  float leg_down = 920;  // 890
+  float leg_up   = 790;  // 830
+  //float leg_down = 890;
+  //float leg_up = 830;
+  
+  // Drawing controls
+  float drawScale = .35;
+
+  PApplet parent;
+  Serial serial;
+  
+  Controller(PApplet parent, int bodyType) {
+    this.parent = parent;
+    serial = new Serial(parent, Serial.list()[0], 9600);
+
     this.state = LIFT_CMD_STATE;
     
     // Initialize legs
@@ -37,11 +51,11 @@ class Controller {
       }
       else if(bodyType == HEX_BODY) {
         rot = -(PI - i/(float)(LEG_COUNT/2) * PI);
-        c = new PVector(cos(rot) * 200, sin(rot) * 200, 0);
+        c = new PVector(cos(rot) * 462, sin(rot) * 462, 0);
       }
       
-      legs[i] = new Leg(this, c, rot, 100,100,100);
-      legs[i].mode = i % 2 == 0 ? Leg.PUSH_MODE : Leg.RETURN_MODE;
+      legs[i] = new Leg(this, c, rot, i%2 == 0 ? true : false);
+      legs[i].setMode(i % 2 == 0 ? Leg.PUSH_MODE : Leg.RETURN_MODE);
     }
     
     changeMoveVector(new MoveVector(new PVector(0,0,0), 0));
@@ -56,13 +70,13 @@ class Controller {
       case LIFT_CMD_STATE:
         // Set new leg targets
         for(int i=0; i<LEG_COUNT; i++) {
-          legs[i].freeze();
+          //legs[i].freeze();
           if(legs[i].mode == Leg.PUSH_MODE) {
-            legs[i].mode = Leg.LIFT_UP_MODE;
+            legs[i].setMode(Leg.LIFT_UP_MODE);
             legs[i].moveTargetUp();
           }
           if(legs[i].mode == Leg.RETURN_MODE) {
-            legs[i].mode = Leg.LIFT_DOWN_MODE;
+            legs[i].setMode(Leg.LIFT_DOWN_MODE);
             legs[i].moveTargetDown();
           }          
         }        
@@ -79,37 +93,78 @@ class Controller {
         }      
         if(allLegsUp && allLegsDown) {  // Check if all feet are up/down
           for(int i=0; i<LEG_COUNT; i++) {
-            legs[i].freeze();
+            //legs[i].freeze();
           }        
           state = PUSH_CMD_STATE;
         }
         break;
       case PUSH_CMD_STATE:
-        // Set new leg motion vectors
+        // Set new leg motion vectors and reset leg stretch data
+        int relaxedIndex = 0;
+        int firstRelaxed = -1;
+        int lastRelaxed = -1;
         for(int i=0; i<LEG_COUNT; i++) {
-          legs[i].freeze();
+          //legs[i].freeze();
           if(legs[i].mode == Leg.LIFT_UP_MODE) {
             legs[i].setCenterTarget();
-            legs[i].mode = Leg.RETURN_MODE;
+            legs[i].setMode(Leg.RETURN_MODE);
           }
           if(legs[i].mode == Leg.LIFT_DOWN_MODE) {
-            legs[i].mode = Leg.PUSH_MODE;
+            if(lastRelaxed == -1) {
+              lastRelaxed = i;
+              firstRelaxed = i;
+            }
+            else {
+              relaxedDistance[relaxedIndex++] = legs[lastRelaxed].untransformFoot().dist(legs[i].untransformFoot());
+              lastRelaxed = i;
+              if(relaxedIndex == relaxedDistance.length-1)
+                relaxedDistance[relaxedIndex] = legs[firstRelaxed].untransformFoot().dist(legs[i].untransformFoot());
+            } 
+            legs[i].setMode(Leg.PUSH_MODE);
           }          
-        }                
+        }           
+        
         state = PUSH_WAIT_STATE;
         break;
       case PUSH_WAIT_STATE: {
         boolean endStop = false;
+        boolean returned = true;
+
+        int stretchIndex = 0;
+        int firstStretch = -1;
+        int lastStretch = -1;
+        
         for(int i=0; i<LEG_COUNT; i++) {
-          if(legs[i].mode == Leg.PUSH_MODE && legs[i].state == Leg.END_STATE)
-            endStop = true;
-        }
-        if(endStop) { // Is any leg forward/backward?
-          for(int i=0; i<LEG_COUNT; i++) {
-            legs[i].freeze();
+          if(legs[i].mode == Leg.PUSH_MODE) {
+            if(lastStretch == -1) {
+              firstStretch = i;
+              lastStretch = i;
+            }
+            else {
+              stretchDistance[stretchIndex++] = legs[lastStretch].untransformFoot().dist(legs[i].untransformFoot());
+              lastStretch = i;
+              
+              if(stretchIndex == stretchDistance.length - 1)
+                stretchDistance[stretchIndex] = legs[firstStretch].untransformFoot().dist(legs[i].untransformFoot());
+            } 
+            
+            if(legs[i].state == Leg.END_STATE)
+              endStop = true;
           }
-          state = LIFT_CMD_STATE;
-          println("Transitioning to lift state");
+          else if(legs[i].mode == Leg.RETURN_MODE && legs[i].state != Leg.END_STATE) {
+            returned = false;
+          }
+        }
+        if(endStop) { // Is any pushing leg forward/backward?
+          for(int i=0; i<LEG_COUNT; i++) {
+            if(legs[i].mode == Leg.PUSH_MODE) {
+              legs[i].setState(Leg.END_STATE);
+            }
+          }
+          if(returned) {
+            state = LIFT_CMD_STATE;
+            println("Transitioning to lift state");
+          }
         }
         break;
       }
@@ -121,12 +176,36 @@ class Controller {
   }
   
   void draw() {
+    drawStretchMarks();
+    // Draw body
+    stroke(255,255,0);
+    fill(50);
+    strokeWeight(10);
+    beginShape();
     for(int i=0; i<LEG_COUNT; i++) {
-      legs[i].draw();
+      vertex(legs[i].center.x*drawScale, legs[i].center.y*drawScale);  
+    }
+    endShape(CLOSE);
+    
+    for(int i=0; i<LEG_COUNT; i++) {
+      pushMatrix();
+      translate(legs[i].center.x*drawScale, legs[i].center.y*drawScale);
+      legs[i].draw(Leg.TOP_VIEW, drawScale);
+      if(i == 1) {
+        translate(0,-200);
+        //legs[i].drawSide();
+      }
+      popMatrix();
     }
     
     text(state == LIFT_CMD_STATE ? "LIFT COMMAND" : state == LIFT_WAIT_STATE ? "LIFT WAIT" :
           state == PUSH_CMD_STATE ? "PUSH COMMAND" : state == PUSH_WAIT_STATE ? "PUSH WAIT" : "???", 0,20);
+  }
+  
+  void drawStretchMarks() {
+      for(int i=0; i<relaxedDistance.length; i++) {
+        text(nfs(stretchDistance[i] - relaxedDistance[i], 2,3), 0, (i+4)*10);
+      }
   }
   
   private void setCurrentMoveVector(MoveVector v) {
@@ -140,8 +219,12 @@ class Controller {
     this.nextMove = v.get();
   }
   
-  void legEndEvent(Leg l) {
-      
+  int getLegNumber(Leg l) {
+    for(int i=0; i<LEG_COUNT; i++) {
+      if(legs[i] == l) return i;
+    }
+    return -1;
   }
+ 
 }
   
