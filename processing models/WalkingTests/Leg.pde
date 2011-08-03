@@ -109,6 +109,8 @@ class Leg {
     centerOfRotation.sub(toBodySpace(deltaTranslation));
     centerOfRotation.add(center);
     
+    currentMove.translation.set(currentMove.translation.x * cos(rot) + currentMove.translation.y * sin(rot),
+                                currentMove.translation.y * cos(rot) - currentMove.translation.x * sin(rot), currentMove.translation.z);
     
     //PVector nextTarget = PVector.add(this.target, PVector.mult(this.currentMove.translation, (mode == RETURN_MODE ? -1 : 1) * moveVectorScaleFactor));
     

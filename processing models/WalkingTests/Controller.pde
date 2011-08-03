@@ -23,10 +23,10 @@ class Controller {
   float[] stretchDistance = {0,0,0};
   
   // Step height stuff
-  float leg_down = 920;  // 890
-  float leg_up   = 790;  // 830
-  //float leg_down = 890;
-  //float leg_up = 830;
+  //float leg_down = 920;  // 890
+  //float leg_up   = 790;  // 830
+  float leg_down = 890;
+  float leg_up = 830;
   
   // Drawing controls
   float drawScale = .35;
