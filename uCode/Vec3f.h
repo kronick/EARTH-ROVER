@@ -2,6 +2,10 @@
 #define _VEC3F_H_
 
 #include <math.h>
+#include <fix16.h>
+#include <fixmath.h>
+#include <fract32.h>
+#include <uint32.h>
 
 class Vec3f {
   public:

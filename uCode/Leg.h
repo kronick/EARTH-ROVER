@@ -16,7 +16,7 @@ class Controller;
 // Constants
 enum Mode {PUSH_MODE, LIFT_DOWN_MODE, RETURN_MODE, LIFT_UP_MODE,
            DANCE_MODE, MANUAL_MODE};
-enum State { MOVE_STATE, END_STATE, UP_STATE, DOWN_STATE};
+enum State { MOVE_STATE=0, END_STATE=1, UP_STATE=2, DOWN_STATE=3};
 
 struct ActLens {
   float a,b,c;
@@ -28,7 +28,7 @@ class Leg {
     static const float hip    = 368.f;  // Height of pivot with frame
     static const float femur  = 212.7;  // Length of hip->tibia
     static const float tibia  = 368.5;  // Length of femur->ankle
-    static const float cankle = 100;    // Extension beyond ankle to foot
+    static const float cankle = 150;    // Extension beyond ankle to foot
 
     static const float swingArm   = 150;
     static const float swingMount = 150;
@@ -37,7 +37,7 @@ class Leg {
     static const float frameSide  = 462;
 
     // Movement increment constants
-    static const float MOVE_FACTOR      = 0.007;
+    static const float MOVE_FACTOR      = 0.007; // 0.007
     static const float TARGET_THRESHOLD = 20;
 
     
@@ -80,6 +80,7 @@ class Leg {
     void moveTargetUp();
     void moveTargetDown();
     void setCenterTarget();
+    Vec3f getCenterTarget();
     
     void setMoveVector(Vec3f t, float r);
     void setMoveVector(MoveVector m);

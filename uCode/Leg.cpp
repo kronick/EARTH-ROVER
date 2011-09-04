@@ -5,6 +5,7 @@
 Leg::Leg() {
   this->parent = 0;
   this->center = Vec3f(0,0,0);
+  this->centerOfRotation = center;
   this->rotation = 0;
   this->flipped = false;
 }
@@ -13,6 +14,7 @@ Leg::Leg(Controller* parent, Vec3f center, float rotation, boolean flipped,
           int pwmPins[], int potPins[], bool simulate) {
   this->parent = parent;
   this->center = center;
+  this->centerOfRotation = center;
   this->rotation = rotation;
   this->flipped = flipped;
 
@@ -37,46 +39,70 @@ Leg::Leg(Controller* parent, Vec3f center, float rotation, boolean flipped,
   setTarget(foot, true);
 }
 void Leg::update() {
+  if(parent->isSlave()) mode = MANUAL_MODE;
   switch (mode) {
     case MANUAL_MODE:
       break;
     default:
       if(state != END_STATE && (mode == PUSH_MODE || mode == RETURN_MODE)) {
         Vec3f nextTarget = target;
-       
-        nextTarget += currentMove.translation *
-                    (mode == RETURN_MODE ? -1 : 1) * MOVE_FACTOR;
+        Vec3f deltaTranslation = currentMove.translation *
+                        (mode == RETURN_MODE ? - 1 : 1) * MOVE_FACTOR;
+        //nextTarget += currentMove.translation *
+        //            (mode == RETURN_MODE ? -1 : 1) * MOVE_FACTOR;
+        Vec3f translated = center - centerOfRotation;
+        Vec3f rotatedTarget = toBodySpace(target) - translated;
+        float rot = (mode == RETURN_MODE ? -1 : 1) * currentMove.yaw *
+                        MOVE_FACTOR;
+        rotatedTarget.rotateZ(rot);
+        rotatedTarget += translated;
+        Vec3f deltaRotation = target - toLegSpace(rotatedTarget);
+
+        nextTarget += deltaRotation + deltaTranslation;
+
+        centerOfRotation -= toBodySpace(deltaTranslation) - center;
+        currentMove.translation.rotateZ(rot);
       
         // Don't move target if the foot is too far away still
-        if(target.dist(foot) > TARGET_THRESHOLD)
-          nextTarget = target;
+        //if(target.dist(foot) > TARGET_THRESHOLD)
+        //  nextTarget = target;
       
         if(!canStepTo(nextTarget) || !setTarget(nextTarget)) {
           // End stop condition
           setTarget(target, true);
           changeState(END_STATE);
         }
-        else changeState(MOVE_STATE);
+        else {
+          changeState(MOVE_STATE);
+          setTarget(nextTarget);
+        }
       }
   
       if(mode == LIFT_UP_MODE && state != UP_STATE) {
         moveTargetUp();
-        setTarget(target + currentMove.translation * MOVE_FACTOR, true);
+        bool force = target.z > parent->getUpHeight()-10;
+        //force = false;
+        //if(target.z > parent->getUpHeight()-30)
         if(foot.z < parent->getUpHeight()) {
           // End stop condition
-          setTarget(foot);
+          setTarget(Vec3f(target.x, target.y, parent->getUpHeight()));
           changeState(UP_STATE);
-          //println(parent.getLegNumber(this) + ": Can't move up any more!");
         }
+        else if (force)
+          setTarget(target + currentMove.translation * MOVE_FACTOR, force);
       }
       if(mode == LIFT_DOWN_MODE && state != DOWN_STATE) {
         moveTargetDown();
-        setTarget(target + currentMove.translation * MOVE_FACTOR, true);
+        bool force = target.z < parent->getDownHeight()+10;
+        //force = false;
+        //if(target.z < parent->getDownHeight()+30)
+        //  setTarget(target + currentMove.translation * MOVE_FACTOR, force);
         if(foot.z > parent->getDownHeight()) {
-          setTarget(foot);
+          setTarget(Vec3f(target.x, target.y, parent->getDownHeight()));
           changeState(DOWN_STATE);
-          //println(parent.getLegNumber(this) + ": Can't move down any more!");
         }
+        else if (force)
+          setTarget(target + currentMove.translation * MOVE_FACTOR, force);
       }
       break;
   }
@@ -90,10 +116,12 @@ void Leg::update() {
   delay(1000);
   */
 
-  if(!remote)
+  if(!remote) {
     for(int i=0; i<3; i++)
       actuators[i].update();
     
+    //solveFK();
+  }
   solveFK();
 
 }
@@ -101,11 +129,12 @@ void Leg::update() {
 void Leg::synchronizeRemote(const Vec3f& remoteFoot){
   if(!remote) {
     // This is an incoming command. Call methods to change state.
-    setTarget(remoteFoot);
+    setTarget(remoteFoot, true);
   }
   else {
     this->foot = remoteFoot;
     // Update actuator lengths based on foot
+    
     ActLens newLens = solveIK(foot);
     actuators[0].setTarget(newLens.a);
     actuators[0].update();
@@ -113,22 +142,22 @@ void Leg::synchronizeRemote(const Vec3f& remoteFoot){
     actuators[1].update();
     actuators[2].setTarget(newLens.c);
     actuators[2].update();
-
+    
   }
 }
 
 void Leg::synchronizeRemote(Mode remoteMode) {
-  if(!remote)
-    changeMode(remoteMode);
-  else
-    this->mode = remoteMode;
+  //if(!remote)
+  //  changeMode(remoteMode);
+  //else
+  //  this->mode = remoteMode;
 }
 
 void Leg::synchronizeRemote(State remoteState) {
-  if(!remote)
-    changeState(remoteState);
-  else
-    this->state = remoteState;
+  //if(!remote)
+  //  changeState(remoteState);
+  //else
+  //  this->state = remoteState;
 }
 
 
@@ -180,8 +209,9 @@ bool Leg::canStepTo(const Vec3f& p) {
 bool Leg::changeMode(Mode m) {
   if(mode == m) return false;
   else {
-    if(!remote) mode = m;
-    else RemoteManager.sendMode(remotePort, remoteIndex, m);
+    mode = m;
+    if(remote)
+      RemoteManager.sendMode(remotePort, remoteIndex, m);
   }
 
   return true;
@@ -193,13 +223,12 @@ Mode Leg::getMode() {
 bool Leg::changeState(State s) {
   if(state == s) return false;
   else {
-    if(!remote) {
-      if(s == END_STATE)
-        freeze();
+    if(s == END_STATE)
+      freeze();
    
-      state = s;
-    }
-    else RemoteManager.sendState(remotePort, remoteIndex, s);
+    state = s;
+    
+    if(remote) RemoteManager.sendState(remotePort, remoteIndex, s);
     return true;
   }
 }
@@ -242,20 +271,23 @@ Vec3f Leg::getFoot() {
 }
 
 void Leg::moveTargetUp() {
-  setMoveVector(Vec3f(0,0,-200), 0);
+  setMoveVector(Vec3f(0,0,-65), 0);
 }
 
 void Leg::moveTargetDown() {
-  setMoveVector(Vec3f(0,0,200), 0);
+  setMoveVector(Vec3f(0,0,65), 0);
 }
 
-void Leg::setCenterTarget() {
+Vec3f Leg::getCenterTarget() {
   ActLens acts = {actuators[0].getMidLength(), actuators[1].getMidLength(),
                   actuators[2].getMidLength()};
   Vec3f middle = solveFK(acts);
-  setTarget(Vec3f(middle.x, 0, parent->getUpHeight()), true);
+  return Vec3f(middle.x, 0, parent->getUpHeight());
 }
 
+void Leg::setCenterTarget() {
+  setTarget(getCenterTarget(), true);
+}
     
 void Leg::setMoveVector(Vec3f t, float r) {
   t.rotateZ(-rotation);
@@ -264,7 +296,7 @@ void Leg::setMoveVector(Vec3f t, float r) {
 
 
 void Leg::setMoveVector(MoveVector m) {
-  Vec3f translation(m.translation);
+  Vec3f translation = m.translation;
   translation.rotateZ(-rotation);
 
   currentMove = MoveVector(translation, m.rotation);
@@ -299,8 +331,10 @@ float Leg::getAngle(const Vec3f& _P) {
 }
 
 void Leg::freeze() {
-  solveFK();
-  setTarget(foot);
+  if(mode == PUSH_MODE) {
+    //solveFK();
+    //setTarget(foot);
+  }
   setMoveVector(MoveVector());
 }
 
@@ -318,33 +352,39 @@ Vec3f Leg::solveFK(ActLens acts, bool assign) {
   /** Solves leg geometry (knee, ankle, foot, swingAngle, unprojectFoot) based on current actuator lengths.
   */
   // Find interior angles
-  float alpha = acos((hip*hip + femur*femur - acts.a*acts.a) / (2*hip*femur)); 
-  float beta  = acos((femur*femur + tibia*tibia - acts.b*acts.b) /
+  float alpha = acosf((hip*hip + femur*femur - acts.a*acts.a) /
+                      (2*hip*femur)); 
+  float beta  = acosf((femur*femur + tibia*tibia - acts.b*acts.b) /
                       (2*femur*tibia));
 
-  Vec3f unprojectKnee(swingArm+femur*sin(alpha), 0, hip-femur*cos(alpha));
-  Vec3f unprojectAnkle((tibia)*sin(beta-alpha), 0, (tibia)*cos(beta-alpha));
+  Vec3f unprojectKnee(swingArm+femur*sinf(alpha), 0, hip-femur*cosf(alpha));
+  Vec3f unprojectAnkle((tibia)*sinf(beta-alpha), 0, (tibia)*cosf(beta-alpha));
   unprojectAnkle += unprojectKnee;
 
-  Vec3f unprojectFoot((tibia+cankle)*sin(beta-alpha), 0,
-                      (tibia+cankle)*cos(beta-alpha));
+  Vec3f unprojectFoot((tibia+cankle)*sinf(beta-alpha), 0,
+                      (tibia+cankle)*cosf(beta-alpha));
   unprojectFoot += unprojectKnee;
 
   float swingAngle = solveSwingAngle(acts.c);
   
-  Vec3f foot(unprojectFoot.x*sin(swingAngle), unprojectFoot.x*cos(swingAngle),
+  
+  Vec3f foot(unprojectFoot.x*sinf(swingAngle),
+             unprojectFoot.x*cosf(swingAngle),
              unprojectFoot.z);
-  Vec3f knee(unprojectKnee.x*sin(swingAngle), unprojectKnee.x*cos(swingAngle),
+  /* 
+  Vec3f knee(unprojectKnee.x*sinf(swingAngle),
+             unprojectKnee.x*cosf(swingAngle),
              unprojectKnee.z);
-  Vec3f ankle(unprojectAnkle.x*sin(swingAngle),
-              unprojectAnkle.x*cos(swingAngle),
+  Vec3f ankle(unprojectAnkle.x*sinf(swingAngle),
+              unprojectAnkle.x*cosf(swingAngle),
               unprojectAnkle.z);
-  Vec3f hipEnd(swingArm*sin(swingAngle), swingArm*cos(swingAngle), hip);
- 
+  Vec3f hipEnd(swingArm*sinf(swingAngle), swingArm*cosf(swingAngle), hip);
+  */
+
   if(assign) {
-    this->knee = knee;
-    this->ankle = ankle;
-    this->hipEnd = hipEnd;
+    //this->knee = knee;
+    //this->ankle = ankle;
+    //this->hipEnd = hipEnd;
     this->swingAngle = swingAngle;
     this->foot = foot;
   }
@@ -354,10 +394,10 @@ Vec3f Leg::solveFK(ActLens acts, bool assign) {
 }
     
 float Leg::solveSwingAngle(float act) {
-  if(flipped) return PI - (acos((swingMount*swingMount + swingBase*swingBase -
+  if(flipped) return PI - (acosf((swingMount*swingMount + swingBase*swingBase -
                     act*act) / (2*swingBase*swingMount)) - frameAngle);
                             
-  else        return acos((swingMount*swingMount + swingBase*swingBase -
+  else        return acosf((swingMount*swingMount + swingBase*swingBase -
                      act*act) / (2*swingBase*swingMount)) - frameAngle;
 
 }
@@ -369,11 +409,11 @@ ActLens Leg::solveIK(const Vec3f& p) {
   ActLens output;
     
   // Calculate angle around hip pivot
-  float swingAngle = flipped ? PI/2 + atan2(p.y, p.x) : PI/2-atan2(p.y, p.x);
+  float swingAngle = flipped ? PI/2 + atan2f(p.y, p.x) : PI/2-atan2f(p.y, p.x);
     
   // Unproject foot point based on swingAngle so the rest
   // can be solved as flat triangles
-  Vec3f f_prime(sqrt(p.x*p.x + p.y*p.y)-swingArm, 0, p.z);
+  Vec3f f_prime(sqrtf(p.x*p.x + p.y*p.y)-swingArm, 0, p.z);
  
   // Distance from bottom of leg to foot
   float D = Vec3f(0,0,hip).dist(f_prime);  
@@ -382,20 +422,20 @@ ActLens Leg::solveIK(const Vec3f& p) {
   float E = f_prime.mag(); 
   
   // Calculate some interior angles
-  float gamma = acos((femur*femur+D*D-(tibia+cankle)*(tibia+cankle)) /
+  float gamma = acosf((femur*femur+D*D-(tibia+cankle)*(tibia+cankle)) /
                 (2*femur*D));
-  float sigma = acos((D*D+hip*hip-E*E) / (2*D*hip));
+  float sigma = acosf((D*D+hip*hip-E*E) / (2*D*hip));
   float alpha = f_prime.x > 0 ? (sigma - gamma) : (TWO_PI - sigma - gamma);
     
   // Law of cosines trigonometry gives magic answers...
-  output.a = sqrt(femur*femur+hip*hip-2*femur*hip*cos(alpha));
-  output.b = sqrt(femur*femur+tibia*tibia -
+  output.a = sqrtf(femur*femur+hip*hip-2*femur*hip*cosf(alpha));
+  output.b = sqrtf(femur*femur+tibia*tibia -
              (tibia*((tibia+cankle)*(tibia+cankle)+femur*femur-D*D) /
              (tibia+cankle))); 
-  output.c = sqrt(swingMount*swingMount +
+  output.c = sqrtf(swingMount*swingMount +
              swingBase*swingBase -
              2*swingMount*swingBase *
-             cos(swingAngle + frameAngle));
+             cosf(swingAngle + frameAngle));
                     
   return output;
 }

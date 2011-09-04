@@ -29,12 +29,15 @@ Vec3f Vec3f::get() {
 }
 
 float Vec3f::mag() {
-  return sqrt(x*x + y*y + z*z);
+  return sqrtf(x*x + y*y + z*z);
 }
 
 float Vec3f::dist(const Vec3f& v2) {
-  return sqrt((x - v2.x)*(x - v2.x) + (y - v2.y)*(y - v2.y) +
-              (z - v2.z)*(z - v2.z));
+  //Fix16 squared((x - v2.x)*(x - v2.x) + (y - v2.y)*(y - v2.y) +
+  //              (z - v2.z)*(z - v2.z));
+  //return (float)squared.sqrt();
+  return sqrtf((x - v2.x)*(x - v2.x) + (y - v2.y)*(y - v2.y) +
+                    (z - v2.z)*(z - v2.z));
 }
 
 void Vec3f::operator+=(const Vec3f& v2) {
@@ -111,14 +114,31 @@ Vec3f Vec3f::cross(const Vec3f& v) {
 }
    
 void Vec3f::rotateX(float theta) {
+  //Fix16 t(theta);
+  //float c = (float)t.cos();
+  //float s = (float)t.sin();
+  float c = cosf(theta);
+  float s = sinf(theta);
 
+  set(x, c * y - s * z, s * y + c * z);
 }
 
 void Vec3f::rotateY(float theta) {
+  //Fix16 t(theta);
+  //float c = (float)t.cos();
+  //float s = (float)t.sin();
+  float c = cosf(theta);
+  float s = sinf(theta);
 
+  set(c * x + s * z, y, c * z - s * x);
 }
 
-void Vec3f::rotateZ(float theta) {
-  set(cos(theta) * x - sin(theta) * y, sin(theta) * x + cos(theta) * y, z);
+void Vec3f::rotateZ(float theta) {  
+  //Fix16 t(theta);
+  //float c = (float)t.cos();
+  //float s = (float)t.sin();
+  float c = cosf(theta);
+  float s = sinf(theta);
+  set(c * x - s * y, s * x + c * y, z);
 }
 

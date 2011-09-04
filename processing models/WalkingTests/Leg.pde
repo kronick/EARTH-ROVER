@@ -25,7 +25,7 @@ class Leg {
   float hip      = 368.5;  // Hight of pivot with frame
   float femur    = 212.7;  // Length of first static element (hip to tibia)
   float tibia    = 368.5;  // Length of second static element (femur to ankle)
-  float cankle   = 100;    // Extension beyond ankle to foot
+  float cankle   = 150;    // Extension beyond ankle to foot
   
   float swingArm   = 150;  // Distance from hip pivot to triangulated leg
   float swingMount = 150;  // Distance along swing arm where swing actuator attaches. Should be less than swingArm.
@@ -348,10 +348,10 @@ class Leg {
         
       
         
-      String x = nf((int)(p.x*100), 5,0);
-      String y = nf((int)(p.y*100), 5,0);
-      String z = nf((int)(p.z*100), 5,0);
-      String out = "!L" + parent.getLegNumber(this) + "x" + x + "y" + y + "z" + z + "*";
+      String x = nf((int)(p.x*10), 5,0);
+      String y = nf((int)(p.y*10), 5,0);
+      String z = nf((int)(p.z*10), 5,0);
+      String out = "!L" + parent.getLegNumber(this) + "X" + x + "Y" + y + "Z" + z + "*";
       //println(out);
       parent.serial.write(out);        
       

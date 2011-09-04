@@ -8,6 +8,10 @@ void RemoteMan::setController(Controller* c) {
 RemoteMan::RemoteMan() {
   Serial1.begin(115200);
   Serial2.begin(115200);
+  Serial1.flush();
+  Serial2.flush();
+  lastContact = 0;
+  timeoutContact = 0;
 }
 
 void RemoteMan::sendStatus(int portNum, int legNum, Leg& leg) {
@@ -54,16 +58,16 @@ void RemoteMan::sendStatus(int portNum, int legNum, Leg& leg) {
 }
 void RemoteMan::sendTarget(int portNum, int legNum, const Vec3f& t) {
   HardwareSerial* port;
-  if(abs(portNum) == 0) port = &Serial1;
-  else                  port = &Serial2;
+  if(portNum == 0) port = &Serial1;
+  else             port = &Serial2;
 
   bool negX = t.x < 0;
   bool negY = t.y < 0;
   bool negZ = t.z < 0;
-  int x = (int)(fabs(t.x) * COORDINATE_MULTIPLIER);
-  int y = (int)(fabs(t.y) * COORDINATE_MULTIPLIER);
-  int z = (int)(fabs(t.z) * COORDINATE_MULTIPLIER);
-
+  int x = (int)((negX ? -1 : 1) * t.x * COORDINATE_MULTIPLIER);
+  int y = (int)((negY ? -1 : 1) * t.y * COORDINATE_MULTIPLIER);
+  int z = (int)((negZ ? -1 : 1) * t.z * COORDINATE_MULTIPLIER);
+  
   char output[22];
   output[0]  = 'L';
   output[1]  = abs(legNum) + '0';
@@ -87,6 +91,7 @@ void RemoteMan::sendTarget(int portNum, int legNum, const Vec3f& t) {
   output[19] = '0' + (z%10);
   output[20] = '*';
   output[21] = '\0';
+  
   port->print(output);
 }
 
@@ -177,6 +182,7 @@ void RemoteMan::processIncoming() {
         incomingZ[portNum] = 0;
         incomingNegative[portNum] = 0;
         incomingMode[portNum] = NO_MODE;
+        //port->flush();
       }
       else if(inByte == '-') incomingNegative[portNum] = true;
       else if(inByte <= 57 && inByte >= 48) {
@@ -220,3 +226,225 @@ void RemoteMan::processIncoming() {
   }
 }
 
+void RemoteMan::processUSB() {
+  /* Possible commands:
+     !WX0000Y0000Z0000A0000* Walk with MoveVector(X,Y,Z, A) where A is rotation
+     !L0X0000Y0000Z0000*     Move specified leg #'s target to (X,Y,Z)
+     !DX0000Y0000Z0000A0000B0000C0000* Kinematics dance to (X,Y,Z, A,B,C)
+                                        where A=yaw, B=pitch, C=roll
+     !G0*                    Change gait. TRIPOD = 1 WAVE = 2 RIPPLE = 3
+
+  */
+
+  statusSent = false;
+
+  timeoutContact++;
+  if(SerialUSB.available() > 0)
+    lastContact = timeoutContact;
+  else if(timeoutContact - lastContact > USB_TIMEOUT) {
+    // If nothing has been sent for a while, freeze.
+    controller->changeGait(Controller::DANCE_GAIT);
+    controller->changeMoveVector(MoveVector(Vec3f(0,0,0), 0,0,0));
+  }
+  while(SerialUSB.available() > 0) {
+    int inByte = SerialUSB.read();
+    if(inByte == '?' && !statusSent) { // Print out leg positions
+      statusSent = true;
+      int statusLength = 25;
+      char output[statusLength * controller->LEG_COUNT*2 + 1];
+      for(int i=0; i<controller->LEG_COUNT*2; i++) {
+        int n = i % controller->LEG_COUNT;
+
+        Vec3f foot = i < controller->LEG_COUNT ?
+                            controller->legs[n].getFoot() :
+                            controller->legs[n].getTarget();
+
+        bool negX = foot.x < 0;
+        bool negY = foot.y < 0;
+        bool negZ = foot.z < 0;
+        int x = (int)(fabs(foot.x) * COORDINATE_MULTIPLIER);
+        int y = (int)(fabs(foot.y) * COORDINATE_MULTIPLIER);
+        int z = (int)(fabs(foot.z) * COORDINATE_MULTIPLIER);
+
+
+        output[i*statusLength + 0]  = (i < controller->LEG_COUNT ? 'L' : 'T');
+        output[i*statusLength + 1]  = n + '0';
+        output[i*statusLength + 2]  = 'X';
+        output[i*statusLength + 3]  = negX ? '-' : '+'; 
+        output[i*statusLength + 4]  = '0' + ((x%10000) / 1000);
+        output[i*statusLength + 5]  = '0' + ((x%1000)/100);
+        output[i*statusLength + 6]  = '0' + ((x%100)/10);
+        output[i*statusLength + 7] = '0' + (x%10);
+        output[i*statusLength + 8] = 'Y';
+        output[i*statusLength + 9]  = negY ? '-' : '+';
+        output[i*statusLength + 10] = '0' + (y / 1000);
+        output[i*statusLength + 11] = '0' + ((y%1000)/100);
+        output[i*statusLength + 12] = '0' + ((y%100)/10);
+        output[i*statusLength + 13] = '0' + (y%10);
+        output[i*statusLength + 14] = 'Z';
+        output[i*statusLength + 15]  = negZ ? '-' : '+';
+        output[i*statusLength + 16] = '0' + (z / 1000);
+        output[i*statusLength + 17] = '0' + ((z%1000)/100);
+        output[i*statusLength + 18] = '0' + ((z%100)/10);
+        output[i*statusLength + 19] = '0' + (z%10);
+        output[i*statusLength + 20] = 'S';
+        output[i*statusLength + 21] = '0'+(int)controller->legs[n].getState();
+        output[i*statusLength + 22] = 'M';
+        output[i*statusLength + 23] = '0'+(int)controller->legs[n].getMode();
+        output[i*statusLength + 24] = '*';
+      }
+      output[statusLength*controller->LEG_COUNT*2] = '\0';
+      SerialUSB.print(output);
+    }
+    if(inByte == '!') { // Reset everything
+      usbLeg = 0;
+      usbX = 0;
+      usbY = 0;
+      usbZ = 0;
+      usbPitch = 0;
+      usbYaw = 0;
+      usbRoll = 0;
+      usbNegative = false;
+      usbMode = NO_MODE;
+      usbControlMode = NO_CONTROL_MODE;
+    }
+    else if(inByte == 'W') usbControlMode = WALK;
+    else if(inByte == 'D') usbControlMode = DANCE;
+    else if(inByte == 'L') {
+      usbControlMode = LEG;
+      usbMode = LEG_SELECT;
+    }
+    else if(inByte == 'G') usbMode = SET_GAIT;
+    
+    else if(inByte == 'X') {
+        usbMode = SET_COORD_X;
+        usbX = 0;
+        usbNegative = false;
+    }
+    else if(inByte == 'Y') {
+        usbMode = SET_COORD_Y;
+        usbY = 0;
+        usbNegative = false;
+    }
+    else if(inByte == 'Z') {
+        usbMode = SET_COORD_Z;
+        usbZ = 0;
+        usbNegative = false;
+    }
+    else if(inByte == 'A') {
+      usbMode = SET_YAW;
+      usbYaw = 0;
+      usbNegative = false;
+    }
+    else if(inByte == 'B') {
+      usbMode = SET_PITCH;
+      usbPitch = 0;
+      usbNegative = false;
+    }
+    else if(inByte == 'C') {
+      usbMode = SET_ROLL;
+      usbRoll = 0;
+      usbNegative = false;
+    }
+    else if(inByte == '*') {  // Stop code. Time to take action!
+      switch(usbControlMode) {
+        case WALK: {
+          controller->changeGait(Controller::TRIPOD_GAIT);
+          Vec3f t(usbX/COORDINATE_MULTIPLIER, usbY/COORDINATE_MULTIPLIER,
+                  usbZ/COORDINATE_MULTIPLIER);
+          MoveVector v(t, usbYaw/ANGLE_MULTIPLIER);
+          controller->changeMoveVector(v);
+          
+          SerialUSB.print("X = ");
+          SerialUSB.println(controller->getMoveVector().translation.x);
+          SerialUSB.print("Y = ");
+          SerialUSB.println(controller->getMoveVector().translation.y);
+          SerialUSB.print("Z = ");
+          SerialUSB.println(controller->getMoveVector().translation.z);
+          SerialUSB.print("R = ");
+          SerialUSB.println(controller->getMoveVector().yaw);
+          SerialUSB.print("*");
+          break;
+        }
+        case DANCE: {
+          controller->changeGait(Controller::DANCE_GAIT);
+          Vec3f t(usbX/COORDINATE_MULTIPLIER, usbY/COORDINATE_MULTIPLIER,
+                  usbZ/COORDINATE_MULTIPLIER);
+          MoveVector v(t, usbYaw/ANGLE_MULTIPLIER,
+                          usbPitch/ANGLE_MULTIPLIER,
+                          usbRoll/ANGLE_MULTIPLIER);
+          controller->changeMoveVector(v);
+         
+          SerialUSB.print("X = ");
+          SerialUSB.println(controller->getMoveVector().translation.x);
+          SerialUSB.print("Y = ");
+          SerialUSB.println(controller->getMoveVector().translation.y);
+          SerialUSB.print("Z = ");
+          SerialUSB.println(controller->getMoveVector().translation.z);
+          SerialUSB.print("YAW   = ");
+          SerialUSB.println(controller->getMoveVector().yaw);
+          SerialUSB.print("PITCH = ");
+          SerialUSB.println(controller->getMoveVector().pitch);
+          SerialUSB.print("ROLL  = ");
+          SerialUSB.println(controller->getMoveVector().roll);
+
+          SerialUSB.print("*");
+         
+          break;
+        }
+        case LEG: {
+          controller->changeGait(Controller::MANUAL_GAIT);
+          controller->moveLegTo(usbLeg, Vec3f(usbX/COORDINATE_MULTIPLIER,
+                                             usbY/COORDINATE_MULTIPLIER,
+                                             usbZ/COORDINATE_MULTIPLIER));
+          break;
+        }
+        default:
+          break;
+       }
+
+       while(SerialUSB.available() > 0)
+         SerialUSB.read();
+    }
+    else if(inByte == '-') usbNegative = true;
+    else if(inByte == '+') usbNegative = false;
+    else if(inByte <= 57 && inByte >= 48) { // It's a digit 0-9
+      int digit = inByte - '0';
+      int* accumulator = NULL;
+      switch(usbMode) {
+        case LEG_SELECT:
+          usbLeg = digit;
+          break;
+        case SET_GAIT:
+          controller->changeGait((Controller::WalkingGait)digit);
+          break;
+        case SET_COORD_X:
+          accumulator = &usbX;
+          break;
+        case SET_COORD_Y:
+          accumulator = &usbY;
+          break;
+        case SET_COORD_Z:
+          accumulator = &usbZ;
+          break;
+        case SET_YAW:
+          accumulator = &usbYaw;
+          break;
+        case SET_PITCH:
+          accumulator = &usbPitch;
+          break;
+        case SET_ROLL:
+          accumulator = &usbRoll;
+          break;
+        default:
+          break;
+      }
+      if(accumulator != NULL) {
+        *accumulator *= 10;
+        *accumulator += (usbNegative? -1 : 1) * digit;
+      }
+    }
+    
+
+  }
+}
