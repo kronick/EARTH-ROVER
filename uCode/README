@@ -1,0 +1,33 @@
+Actuator.cpp     Handles reading of analog input, writing of PWM output, and
+                 easing between current + target lengths of each actuator.
+
+Controller.cpp   Manages walking gaits, sends new positions to each leg
+                 depending on where in the walk cycle the legs are. Most of the
+                 processing happens on the master controller; the slaves just
+                 move their legs according to incoming signals.
+
+Leg.cpp          Handles forward and inverse kinematics for each leg.
+                 Forward kinematics asks "given the actuator positions,
+                 where is my foot?"
+                 Inverse kinematics asks "given a desired foot position,
+                 what should the actuator lengths be?"
+                 Also contains transformations between leg space and body space
+
+MoveVector.h     A simple structure for holding a leg move trajectory--
+                 Linear motion as well as pitch, yaw, roll. Used by Leg class
+                 to interpolate movements.
+
+RemoteMan.cpp    Processes incoming commands on both serial port (from other
+                 control boxes) and USB port (from controlling PC)
+
+Vec3f.cpp        Class for describing and manipulating 3D vector positions.
+
+-------------------------------------------------------------------------------
+
+WalkBox/WalkBox.pde is the main sketch file to run from the Maple IDE. Change
+MODULE_NUMBER on line 18 for each control box before uploading.
+
+INSTALLATION INSTRUCTIONS:
+All files except WalkBox.pde are installed as a Maple library. This means they
+should go somewhere like ~/Documents/MapleIDE/libraries/ROVER/
+WalkBox.pde should go in ~/Documents/MapleIDE/WalkBox/
